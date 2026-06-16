@@ -10,6 +10,13 @@ import shutil
 import subprocess
 import sys
 import time
+
+# Force UTF-8 encoding on Windows to prevent UnicodeEncodeError
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -371,6 +378,10 @@ def build_module(
                     return False, time.time() - start, f"npm install failed:\n{install_result.stderr}"
             except subprocess.TimeoutExpired:
                 return False, time.time() - start, "npm install TIMEOUT (120s)"
+            except FileNotFoundError as e:
+                return False, time.time() - start, f"npm install failed: Command not found: {e}"
+            except Exception as e:
+                return False, time.time() - start, f"npm install failed: {e}"
 
     if module.name == "engine":
 
@@ -457,14 +468,13 @@ def verify_binary(module: Module) -> Optional[str]:
         return None
     path = module.build_dir
     if module.name == "backend":
-
         target = path / "debug" / module.name
         if not target.exists():
             target = path / "release" / module.name
         if target.exists():
-            return str(target)
+            return target.relative_to(ROOT).as_posix()
     if path.exists():
-        return str(path)
+        return path.relative_to(ROOT).as_posix()
     return None
 
 def run_cmd(cmd: list[str], **kwargs) -> tuple[bool, str]:
@@ -540,7 +550,7 @@ def build_diagnostic_report(
 
     decrypt_target = logd_relpaths[0] if logd_relpaths and len(logd_relpaths) == 1 else None
     if logd_relpaths and len(logd_relpaths) > 1:
-        decrypt_target = str((DIAGNOSTIC_DIR / f"build-{commit_id}.logd").relative_to(ROOT))
+        decrypt_target = (DIAGNOSTIC_DIR / f"build-{commit_id}.logd").relative_to(ROOT).as_posix()
 
     report = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -743,8 +753,8 @@ def generate_logd(
 
         safe_pw = sr.stdout.strip()
         logd_files = split_diagnostic_logd(logd_path)
-        logd_relpaths = [str(path.relative_to(ROOT)) for path in logd_files]
-        decrypt_target = logd_relpaths[0] if len(logd_relpaths) == 1 else str(logd_path.relative_to(ROOT))
+        logd_relpaths = [path.relative_to(ROOT).as_posix() for path in logd_files]
+        decrypt_target = logd_relpaths[0] if len(logd_relpaths) == 1 else logd_path.relative_to(ROOT).as_posix()
         write_diagnostic_report(
             metadata_path,
             build_diagnostic_report(
@@ -931,17 +941,19 @@ Diagnostic bundle:
     print(f"\n  {color(f'Building {len(selected)} module(s) | release={args.release}', Colors.GRAY)}")
 
     results: list[tuple[str, bool, float, str, Optional[str]]] = []
+    diagnostics_ok = False
 
-    for module in selected:
-        success, elapsed, output = build_module(module, args.release, args.verbose)
-        binary = verify_binary(module) if success else None
-        results.append((module.name, success, elapsed, output, binary))
+    try:
+        for module in selected:
+            success, elapsed, output = build_module(module, args.release, args.verbose)
+            binary = verify_binary(module) if success else None
+            results.append((module.name, success, elapsed, output, binary))
 
-    print_summary(results)
+        print_summary(results)
+    finally:
+        diagnostics_ok = generate_logd(results, args.verbose)
 
-    diagnostics_ok = generate_logd(results, args.verbose)
-
-    return 0 if diagnostics_ok and all(r[1] for r in results) else 1
+    return 0 if diagnostics_ok and (len(results) == len(selected) and all(r[1] for r in results)) else 1
 
 if __name__ == "__main__":
     sys.exit(main())
