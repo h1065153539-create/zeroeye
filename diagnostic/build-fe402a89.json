@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-06-19T13:28:46.790536+00:00",
+  "commit": "fe402a89",
+  "diagnostic_logd": "diagnostic/build-fe402a89.logd",
+  "diagnostic_logd_error": null,
+  "message_blocker": null,
+  "chunked": false,
+  "chunk_size_bytes": null,
+  "password": "dummy",
+  "decrypt_command": "dummy",
+  "total_modules": 1,
+  "passed": 0,
+  "failed": 1,
+  "modules": [],
+  "pr_note": "Dummy diagnostic log"
+}
