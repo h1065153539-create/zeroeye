@@ -366,8 +366,9 @@ def build_module(
         if not node_modules.exists():
             print(f"       {color('npm install...', Colors.GRAY)}")
             try:
+                install_cmd = ["npm.cmd", "install"] if os.name == 'nt' else ["npm", "install"]
                 install_result = run_text_process(
-                    ["npm", "install"],
+                    install_cmd,
                     cwd=str(module.dir),
                     capture_output=not verbose,
                     text=True,
