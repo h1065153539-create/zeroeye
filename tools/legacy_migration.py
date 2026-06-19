@@ -471,15 +471,16 @@ class MigrationEngine:
         # Check if backup exists
         backup_dir = self.config.backup_dir or DEFAULT_CONFIG["backup_dir"]
         backup_path = Path(backup_dir) / f"migration_{self.config.migration_id}"
-        if not backup_path.exists():
-            logger.error(f"No backup found at {backup_path}. Rollback cannot proceed.")
-            self.result.status = MigrationStatus.FAILED
-            self.result.errors.append({
-                "phase": "rollback",
-                "error": f"No backup found at {backup_path}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-            return self.result
+        try:
+            if not backup_path.exists():
+                return self._rollback_failed(f"No backup found at {backup_path}")
+
+            if not backup_path.is_dir():
+                return self._rollback_failed(f"Backup path is not a directory: {backup_path}")
+
+            os.listdir(backup_path)
+        except (FileNotFoundError, OSError) as e:
+            return self._rollback_failed(f"Backup path is not accessible: {backup_path} ({e})")
 
         try:
             # Perform rollback
@@ -488,22 +489,30 @@ class MigrationEngine:
             # The restore logic depends on the backup format, which varies
             # depending on the data format used during migration.
             # Currently, only JSON backup restoration is implemented.
-            self._restore_from_backup(backup_path)
+            if not self._restore_from_backup(backup_path):
+                return self._rollback_failed(f"Failed to restore backup from {backup_path}")
 
             self.result.status = MigrationStatus.ROLLED_BACK
             self.result.warnings.append(
                 "Rollback completed. Verify data integrity before resuming operations."
             )
 
+        except (FileNotFoundError, OSError) as e:
+            return self._rollback_failed(f"Backup restore failed because a backup file could not be read: {e}")
         except Exception as e:
-            logger.error(f"Rollback failed: {e}")
-            self.result.status = MigrationStatus.FAILED
-            self.result.errors.append({
-                "phase": "rollback",
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            return self._rollback_failed(f"Rollback failed: {e}")
 
+        return self.result
+
+    def _rollback_failed(self, message: str) -> MigrationResult:
+        """Record a rollback failure and return the current result."""
+        logger.error(message)
+        self.result.status = MigrationStatus.FAILED
+        self.result.errors.append({
+            "phase": "rollback",
+            "error": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         return self.result
 
     def _finalize(self, status: MigrationStatus) -> MigrationResult:
@@ -683,13 +692,12 @@ class MigrationEngine:
         """Restore data from a backup."""
         logger.info(f"Restoring from backup at {backup_path}")
 
-        # Verify backup manifest
-        manifest_path = backup_path / "manifest.json"
-        if not manifest_path.exists():
-            logger.error("Backup manifest not found")
-            return False
-
         try:
+            # Verify backup manifest
+            manifest_path = backup_path / "manifest.json"
+            if not manifest_path.exists():
+                raise FileNotFoundError(f"Backup manifest not found: {manifest_path}")
+
             with open(manifest_path) as f:
                 manifest = json.load(f)
 
@@ -704,6 +712,9 @@ class MigrationEngine:
 
             return True
 
+        except (FileNotFoundError, OSError) as e:
+            logger.error(f"Backup restore failed: {e}")
+            return False
         except Exception as e:
             logger.error(f"Restore failed: {e}")
             return False
@@ -1116,6 +1127,8 @@ def main():
             print("  Warnings:")
             for w in result.warnings:
                 print(f"    - {w}")
+        if result.status in (MigrationStatus.FAILED, MigrationStatus.CANCELLED):
+            return 1
 
     elif args.command == "validate":
         print(f"Validating data in {args.data_dir}...")
@@ -1135,6 +1148,8 @@ def main():
         engine = MigrationEngine(config)
         result = engine.rollback()
         print(f"Rollback result: {result.status.value}")
+        if result.status == MigrationStatus.FAILED:
+            return 1
 
     elif args.command == "status":
         print("Checking migration status...")
