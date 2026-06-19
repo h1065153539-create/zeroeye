@@ -85,29 +85,30 @@ def clamp(value: float, min_val: float, max_val: float) -> float:
 def round_to_tick(value: float, tick_size: float) -> float:
     return round(value / tick_size) * tick_size
 
-def random_phone() -> str:
-    return f"+1-{random.randint(200, 999)}-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
+def random_phone(rand: random.Random) -> str:
+    return f"+1-{rand.randint(200, 999)}-{rand.randint(100, 999)}-{rand.randint(1000, 9999)}"
 
-def random_email(first: str, last: str) -> str:
-    domain = random.choice(DOMAINS)
-    pattern = random.choice([
+def random_email(rand: random.Random, first: str, last: str) -> str:
+    domain = rand.choice(DOMAINS)
+    pattern = rand.choice([
         f"{first.lower()}.{last.lower()}",
         f"{first.lower()}{last.lower()}",
         f"{first[0].lower()}{last.lower()}",
         f"{last.lower()}.{first.lower()}",
-        f"{first.lower()}{random.randint(1, 999)}",
+        f"{first.lower()}{rand.randint(1, 999)}",
     ])
     return f"{pattern}@{domain}"
 
-def random_datetime(start_year: int = 2023, end_year: int = 2024) -> datetime:
+def random_datetime(rand: random.Random, start_year: int = 2023, end_year: int = 2024) -> datetime:
     start = datetime(start_year, 1, 1, tzinfo=timezone.utc)
     end = datetime(end_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     delta = end - start
-    return start + timedelta(seconds=random.randint(0, int(delta.total_seconds())))
+    return start + timedelta(seconds=rand.randint(0, int(delta.total_seconds())))
 
 
 class DataGenerator:
     def __init__(self, seed: int = 42):
+        self.seed = seed
         self.random = random.Random(seed)
         self.instruments = INSTRUMENTS
         self.users: List[Dict[str, Any]] = []
@@ -126,16 +127,16 @@ class DataGenerator:
             last = self.random.choice(LAST_NAMES)
             user = {
                 "id": f"user_{self.user_counter:04d}",
-                "email": random_email(first, last),
+                "email": random_email(self.random, first, last),
                 "name": f"{first} {last}",
                 "role": self.random.choice(["trader", "trader", "trader", "admin",
                                             "analyst", "viewer"]),
                 "status": self.random.choice(["active", "active", "active", "active", "inactive"]),
                 "mfa_enabled": self.random.random() < 0.3,
                 "email_verified": self.random.random() < 0.95,
-                "created_at": random_datetime().isoformat(),
-                "last_login": random_datetime(2024, 2024).isoformat(),
-                "phone": random_phone(),
+                "created_at": random_datetime(self.random).isoformat(),
+                "last_login": random_datetime(self.random, 2024, 2024).isoformat(),
+                "phone": random_phone(self.random),
                 "preferences": {
                     "theme": self.random.choice(["dark", "light"]),
                     "language": "en",
@@ -180,8 +181,8 @@ class DataGenerator:
                 "status": self.random.choice(ORDER_STATUSES),
                 "filled_quantity": 0,
                 "avg_fill_price": None,
-                "created_at": random_datetime().isoformat(),
-                "updated_at": random_datetime(2024, 2024).isoformat(),
+                "created_at": random_datetime(self.random).isoformat(),
+                "updated_at": random_datetime(self.random, 2024, 2024).isoformat(),
             }
             self.orders.append(order)
 
@@ -210,7 +211,7 @@ class DataGenerator:
                 "quantity": quantity,
                 "total": round(price * quantity, 2),
                 "side": side,
-                "timestamp": random_datetime(2024, 2024).isoformat(),
+                "timestamp": random_datetime(self.random, 2024, 2024).isoformat(),
                 "buyer": self.random.choice(self.users)["id"],
                 "seller": self.random.choice(self.users)["id"],
                 "buyer_fee": round(price * quantity * 0.001, 2),
@@ -239,7 +240,7 @@ class DataGenerator:
                 "ask": round_to_tick(price + instrument["tick_size"] * self.random.randint(1, 5),
                                     instrument["tick_size"]),
                 "volume": round(self.random.expovariate(1.0 / instrument["vol"]), 4),
-                "timestamp": int(time.time() * 1000) - (count - i) * 1000,
+                "timestamp": int(random_datetime(self.random, 2024, 2024).timestamp() * 1000) - (count - i) * 1000,
             }
             ticks.append(tick)
 
@@ -251,7 +252,7 @@ class DataGenerator:
         instrument = next(i for i in self.instruments if i["symbol"] == instrument_symbol)
         candles = []
         price = instrument["price"]
-        now = int(time.time() * 1000)
+        now = int(random_datetime(self.random, 2024, 2024).timestamp() * 1000)
         interval_ms = interval_minutes * 60 * 1000
 
         for i in range(count):
@@ -285,6 +286,7 @@ class DataGenerator:
             return
         fn = fieldnames or list(data[0].keys())
         with open(filepath, "w", newline="") as f:
+            f.write(f"# Seed: {self.seed}\n")
             writer = csv.DictWriter(f, fieldnames=fn, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(data)
@@ -294,7 +296,8 @@ class DataGenerator:
 def parse_args():
     parser = argparse.ArgumentParser(description="Test data generator")
     parser.add_argument("--output-dir", "-o", default="./test_data", help="Output directory")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed (defaults to random)")
+    parser.add_argument("--print-seed", action="store_true", help="Print the generated or provided seed")
     parser.add_argument("--users", type=int, default=50, help="Number of users to generate")
     parser.add_argument("--orders", type=int, default=200, help="Number of orders to generate")
     parser.add_argument("--trades", type=int, default=500, help="Number of trades to generate")
@@ -308,6 +311,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+    
+    if args.seed is None:
+        args.seed = random.randint(1, 1000000)
+    if args.print_seed:
+        print(f"Seed: {args.seed}")
+
     gen = DataGenerator(args.seed)
 
     os.makedirs(args.output_dir, exist_ok=True)

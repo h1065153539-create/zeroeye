@@ -52,3 +52,24 @@ gpg -d backup/tent_production_20240101.sql.gz | gunzip | psql -h localhost tent_
 ```
 
 The GPG key ID is stored in the team vault under `secret/database/backup-key`.
+
+## Generating Test Data
+
+The `tools/data_generator.py` script can be used to generate realistic-looking market data, users, orders, and trades. It supports reproducible deterministic output through the use of seeds.
+
+Examples:
+
+Generate data with a specific seed to ensure reproducible identical outputs:
+```bash
+python tools/data_generator.py --seed 12345 --output-dir data/test
+```
+
+Generate random data and print the chosen seed so the exact data can be reproduced later:
+```bash
+python tools/data_generator.py --print-seed --output-dir data/test
+```
+
+You can also export to CSV and JSON formats. CSV outputs will include the seed in a comment header.
+```bash
+python tools/data_generator.py --seed 42 --format both --output-dir data/test
+```
