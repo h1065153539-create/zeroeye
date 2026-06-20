@@ -9,6 +9,7 @@
 ## Testing
 
 <!-- Required: Describe what you ran locally and the results. Include relevant commands. Verifying the build locally is required. -->
+<!-- Required for bounty submissions: include a real diagnostic/build-<commit>.logd artifact and matching diagnostic JSON metadata. The checked-in diagnostic/build-00000000.* stub files are examples only and are not valid diagnostic evidence. -->
 
 ## Checklist
 

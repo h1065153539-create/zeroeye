@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify new diagnostic .logd and .json are committed in this PR
+      - name: Verify real diagnostic bundle is committed in this PR
         shell: bash
         run: |
           set -euo pipefail
@@ -34,12 +34,12 @@ jobs:
           )
 
           if [ "${#new_logd[@]}" -eq 0 ]; then
-            echo "::error::This PR must commit a new diagnostic .logd file under diagnostic/."
+            echo "::error::This PR must commit at least one real diagnostic .logd file under diagnostic/."
             exit 1
           fi
 
           if [ "${#new_json[@]}" -eq 0 ]; then
-            echo "::error::This PR must commit a new diagnostic .json file under diagnostic/."
+            echo "::error::This PR must commit matching diagnostic JSON metadata under diagnostic/."
             exit 1
           fi
 
@@ -49,7 +49,8 @@ jobs:
           echo "Found new diagnostic .json file(s):"
           printf ' - %s\n' "${new_json[@]}"
 
-          for file in "${new_logd[@]}" "${new_json[@]}"; do
+          valid_logd=0
+          for file in "${new_logd[@]}"; do
             if [ ! -f "${file}" ]; then
               echo "::error file=${file}::Diagnostic file path is not a file."
               exit 1
@@ -59,4 +60,51 @@ jobs:
               echo "::error file=${file}::Diagnostic file is empty."
               exit 1
             fi
+
+            name="$(basename "${file}")"
+            if [ "${name}" = "build-00000000.logd" ]; then
+              echo "::error file=${file}::diagnostic/build-00000000.logd is the checked-in stub and is not valid PR diagnostic evidence."
+              exit 1
+            fi
+
+            if [[ ! "${name}" =~ ^build-[0-9a-f]{8}(-part[0-9]{3})?\.logd$ ]]; then
+              echo "::error file=${file}::Diagnostic .logd must use the build-<8-hex-commit>.logd naming produced by build.py."
+              exit 1
+            fi
+
+            commit_id="${name#build-}"
+            commit_id="${commit_id%%.logd}"
+            commit_id="${commit_id%%-part*}"
+
+            metadata_json="diagnostic/build-${commit_id}.json"
+            metadata_legacy="diagnostic/build-${commit_id}-metadata.json"
+            if [ ! -f "${metadata_json}" ] && [ ! -f "${metadata_legacy}" ]; then
+              echo "::error file=${file}::Missing matching diagnostic metadata: ${metadata_json} or ${metadata_legacy}."
+              exit 1
+            fi
+
+            valid_logd=$((valid_logd + 1))
           done
+
+          for file in "${new_json[@]}"; do
+            if [ ! -f "${file}" ]; then
+              echo "::error file=${file}::Diagnostic metadata path is not a file."
+              exit 1
+            fi
+
+            if [ ! -s "${file}" ]; then
+              echo "::error file=${file}::Diagnostic metadata file is empty."
+              exit 1
+            fi
+
+            name="$(basename "${file}")"
+            if [ "${name}" = "build-00000000.json" ] || [ "${name}" = "build-00000000-metadata.json" ]; then
+              echo "::error file=${file}::diagnostic/${name} is the checked-in stub metadata and is not valid PR diagnostic evidence."
+              exit 1
+            fi
+          done
+
+          if [ "${valid_logd}" -eq 0 ]; then
+            echo "::error::This PR must include at least one non-stub diagnostic .logd artifact."
+            exit 1
+          fi
