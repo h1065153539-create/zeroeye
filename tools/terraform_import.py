@@ -93,6 +93,7 @@ SUPPORTED_RESOURCE_TYPES = [
 ]
 
 REQUIRED_TERRAFORM_VERSION = ">= 1.0.0"
+TERRAFORM_RESOURCE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # ---------------------------------------------------------------------------
 # DATA MODELS
@@ -115,6 +116,27 @@ class ImportResult:
     skipped_count: int = 0
     results: List[Dict[str, Any]] = field(default_factory=list)
     duration_seconds: float = 0.0
+
+
+class TerraformResourceNameError(ValueError):
+    """Raised when a resource name cannot be used in a Terraform address."""
+
+
+def validate_terraform_resource_name(resource: ResourceToImport) -> None:
+    if TERRAFORM_RESOURCE_NAME_PATTERN.fullmatch(resource.resource_name):
+        return
+
+    raise TerraformResourceNameError(
+        "Invalid Terraform resource name for "
+        f"{resource.resource_type}: {resource.resource_name!r}. "
+        "Resource names must be valid Terraform identifiers: start with a "
+        "letter or underscore and contain only letters, digits, and underscores."
+    )
+
+
+def terraform_resource_address(resource: ResourceToImport) -> str:
+    validate_terraform_resource_name(resource)
+    return f"{resource.resource_type}.{resource.resource_name}"
 
 # ---------------------------------------------------------------------------
 # IMPORTER
@@ -142,7 +164,21 @@ class TerraformImporter:
             return False
 
     def import_resource(self, resource: ResourceToImport) -> bool:
-        address = f"{resource.resource_type}.{resource.resource_name}"
+        try:
+            address = terraform_resource_address(resource)
+        except TerraformResourceNameError as e:
+            error = str(e)
+            logger.error(error)
+            self.results.append({
+                "address": "",
+                "resource_type": resource.resource_type,
+                "resource_name": resource.resource_name,
+                "resource_id": resource.resource_id,
+                "status": "invalid_name",
+                "error": error,
+            })
+            return False
+
         cmd = [
             self.terraform_binary, "import",
             "-state", str(self.state_dir / resource.state_file),
@@ -208,7 +244,22 @@ class TerraformImporter:
         if dry_run:
             logger.info("DRY RUN - No resources will be imported")
             for resource in resources:
-                address = f"{resource.resource_type}.{resource.resource_name}"
+                try:
+                    address = terraform_resource_address(resource)
+                except TerraformResourceNameError as e:
+                    error = str(e)
+                    logger.error(error)
+                    import_result.results.append({
+                        "address": "",
+                        "resource_type": resource.resource_type,
+                        "resource_name": resource.resource_name,
+                        "resource_id": resource.resource_id,
+                        "status": "invalid_name",
+                        "error": error,
+                    })
+                    import_result.failure_count += 1
+                    continue
+
                 logger.info(f"  Would import: {address} (ID: {resource.resource_id})")
                 import_result.results.append({
                     "address": address,
@@ -262,7 +313,7 @@ class TerraformImporter:
         lines = ["#!/bin/bash", "# Auto-generated Terraform import script", f"# Generated: {datetime.now().isoformat()}", ""]
 
         for resource in resources:
-            address = f"{resource.resource_type}.{resource.resource_name}"
+            address = terraform_resource_address(resource)
             lines.append(
                 f"terraform import -state={resource.state_file} {address} {resource.resource_id}"
             )
@@ -509,7 +560,11 @@ def main():
         logger.info(f"Loaded {len(resources_to_import)} resources from {args.csv}")
 
         if args.generate_script:
-            importer.generate_import_script(resources_to_import, args.generate_script)
+            try:
+                importer.generate_import_script(resources_to_import, args.generate_script)
+            except TerraformResourceNameError as e:
+                logger.error(str(e))
+                return 1
         else:
             result = importer.import_batch(
                 resources_to_import,
