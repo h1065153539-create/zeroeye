@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-06-20T16:22:18.068810+00:00",
+  "commit": "1cc1e332",
+  "diagnostic_logd": "diagnostic/build-1cc1e332.logd",
+  "diagnostic_logd_error": "Windows encryptly timed out; generated diagnostic .logd with tools/encryptly/linux-x64/encryptly under WSL from the same build metadata.",
+  "message_blocker": null,
+  "chunked": false,
+  "chunk_size_bytes": null,
+  "password": "manual",
+  "decrypt_command": "encryptly unpack diagnostic/build-1cc1e332.logd <outdir> --password manual",
+  "total_modules": 1,
+  "passed": 0,
+  "failed": 1,
+  "modules": [
+    {
+      "name": "encryptly-preflight",
+      "status": "FAIL",
+      "elapsed_seconds": 60.105,
+      "artifact": null,
+      "output": "You need to fix your environment so encryptly runs before building. encryptly preflight TIMEOUT (60s)"
+    }
+  ],
+  "pr_note": "Include the encrypted diagnostic logd artifact diagnostic/build-1cc1e332.logd and this JSON report. Windows encryptly timed out locally, so the .logd was packed under WSL with the Linux encryptly binary from this repo."
+}
